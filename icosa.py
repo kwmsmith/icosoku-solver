@@ -1,5 +1,6 @@
 import operator
 from collections import Counter, namedtuple
+from copy import deepcopy
 
 Piece = namedtuple('Piece', 'id value')
 
@@ -114,39 +115,67 @@ def rot_piece(piece, r):
     if r == 2:
         return (val[2], val[0], val[1])
 
+def vertex_to_faces(faces):
+    v2f = {i:[] for i in range(1, 13)}
+    for face in faces:
+        for v in face:
+            v2f[v].append(face)
+    return {v:tuple(f) for v, f in v2f.items()}
+
 def setup_state(pieces, vertices):
     gr = make_vertex_graph(vertices)
     faces = icosa_faces(gr)
-    faces_to_pieces = {f:{} for f in faces}
+    faces_to_pieces = {f:[0,{}] for f in faces}
     for piece in pieces:
+        if piece.value[0] == piece.value[1] == piece.value[2]:
+            poss_rots = [0]
+        else:
+            poss_rots = range(3)
         for face in faces:
             rots = []
-            for rot in range(0, 3):
+            for rot in poss_rots:
                 rpiece = rot_piece(piece, rot)
                 if min(f - p for p, f in zip(rpiece, face)) >= 0:
                     rots.append(rot)
             if rots:
-                faces_to_pieces[face][piece] = rots
-    pieces_to_faces = {p:{} for p in pieces}
-    for face, pcs in faces_to_pieces.items():
+                faces_to_pieces[face][1][piece] = rots
+                faces_to_pieces[face][0] += len(rots)
+    pieces_to_face_cnt = {p:0 for p in pieces}
+    for face, (cnt, pcs) in faces_to_pieces.items():
         for piece, rots in pcs.items():
-            pieces_to_faces[piece][face] = rots
-    return faces_to_pieces, pieces_to_faces
+            pieces_to_face_cnt[piece] += len(rots)
+    return faces_to_pieces, pieces_to_face_cnt, vertex_to_faces(faces)
 
 def get_bestface(f2p):
-    return min((total_piece_options(pcs), face) for face, pcs in f2p.items())[1]
-
-def total_piece_options(pcs):
-    return reduce(lambda x,y: x + len(y), pcs.values(), 0)
+    def keyfunc(item):
+        return item[1][0]
+    return min(f2p.items(), key=keyfunc)[0]
 
 def order_pieces(pieces, p2f):
-    return sorted((total_piece_options(p2f[piece]), piece, rots) for piece, rots in pieces.items())
+    return sorted((p2f[piece], piece, rots) for piece, rots in pieces.items())
 
-def search(faces_to_pieces, pieces_to_faces, placements, vtxsum, vtxocc):
-    if len(faces_to_pieces) <= 9:
-        import ipdb; ipdb.set_trace()
+def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, faces):
+    for face in faces:
+        idx = face.index(vtx)
+        try:
+            cnt, pieces = faces_to_pieces[face]
+        except KeyError:
+            continue
+        for piece, rots in pieces.items():
+            newrots = []
+            for rot in rots:
+                pval = rot_piece(piece, rot)[idx]
+                if lower_bound <= vtx - pval <= upper_bound:
+                    newrots.append(rot)
+            pieces[piece] = newrots
+            delta = len(rots) - len(newrots)
+            faces_to_pieces[face][0] -= delta
+            pieces_to_face_cnt[piece] -= delta
+
+
+def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
     assert len(faces_to_pieces) + len(placements) == 20
-    assert len(faces_to_pieces) == len(pieces_to_faces)
+    assert len(faces_to_pieces) == len(pieces_to_face_cnt)
 
     # check goal, if found, return goal
     if not faces_to_pieces:
@@ -155,15 +184,18 @@ def search(faces_to_pieces, pieces_to_faces, placements, vtxsum, vtxocc):
     # bestface = (face with fewest piece options)
     bestface = get_bestface(faces_to_pieces)
 
-    pieces = faces_to_pieces.pop(bestface)
+    cnt, pieces = faces_to_pieces.pop(bestface)
 
     # order bestface's pieces by total number of placements overall, including rotations.
-    ordered_pieces = order_pieces(pieces, pieces_to_faces)
+    ordered_pieces = order_pieces(pieces, pieces_to_face_cnt)
 
     # bump the vertex occupancy
     for vtx in bestface:
         vtxocc[vtx] += 1
         assert vtxocc[vtx] <= 5
+
+    faces_to_pieces_orig = faces_to_pieces
+    pieces_to_face_cnt_orig = pieces_to_face_cnt
 
     # try placing each piece in ordered_pieces, checking vertex sums, etc.
     for idx, (rank, piece, rots) in enumerate(ordered_pieces):
@@ -172,29 +204,32 @@ def search(faces_to_pieces, pieces_to_faces, placements, vtxsum, vtxocc):
         if idx and piece.value == ordered_pieces[idx-1][1].value:
             continue
 
+        faces_to_pieces = deepcopy(faces_to_pieces_orig)
+        pieces_to_face_cnt = pieces_to_face_cnt_orig.copy()
+
         # take piece off the market for other faces...
-        other_faces = pieces_to_faces.pop(piece)
-        # import ipdb; ipdb.set_trace()
-        for oface, _ in other_faces.items():
-            try:
-                del faces_to_pieces[oface][piece]
-            except KeyError:
-                pass
+        pieces_to_face_cnt.pop(piece)
+        for face, (pcnt, pieces) in faces_to_pieces.items():
+            if piece in pieces:
+                faces_to_pieces[face][0] -= len(pieces.pop(piece))
 
         for rot in rots:
             rpiece = rot_piece(piece, rot)
             # update the vertex sums...
             for vtx, points in zip(bestface, rpiece):
                 vtxsum[vtx] += points
-            # check for vertex inconsistencies
+            # bound faces at each vertex.
             for vtx in bestface:
-                if vtxsum[vtx] > vtx:
+                upper_bound = min(vtx - vtxsum[vtx], 3)
+                lower_bound = float(vtx - vtxsum[vtx]) / (5 - vtxocc[vtx])
+                if upper_bound < 0 or lower_bound > 3:
                     break
-                if (vtx - vtxsum[vtx]) > 3 * (5 - vtxocc[vtx]):
+                if lower_bound > upper_bound:
                     break
+                set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, vtx2faces[vtx])
             else:
                 placements[bestface] = rpiece
-                if search(faces_to_pieces, pieces_to_faces, placements, vtxsum, vtxocc):
+                if search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
                     return True
                 # reset placements
                 del placements[bestface]
@@ -202,29 +237,20 @@ def search(faces_to_pieces, pieces_to_faces, placements, vtxsum, vtxocc):
             for vtx, points in zip(bestface, rpiece):
                 vtxsum[vtx] -= points
 
-        # piece is back in the running...
-        for oface, orots in other_faces.items():
-            try:
-                faces_to_pieces[oface][piece] = orots
-            except KeyError:
-                pass
-        pieces_to_faces[piece] = other_faces
-
     # reset vertex occupancy
     for vtx in bestface:
         vtxocc[vtx] -= 1
 
     # reset faces_to_pieces
-    faces_to_pieces[bestface] = pieces
+    faces_to_pieces_orig[bestface] = [cnt, pieces]
 
     return False
 
 
 if __name__ == '__main__':
-    gr = make_vertex_graph(vertices)
-    ifaces = icosa_faces(gr)
-    f2p, p2f = setup_state(pieces, vertices)
+    f2p, p2f, v2f = setup_state(pieces, vertices)
     placements = {}
     vtxsum = {v:0 for v in vertices}
     vtxocc = vtxsum.copy()
-    search(f2p, p2f, placements, vtxsum, vtxocc)
+    import ipdb; ipdb.set_trace()
+    success = search(f2p, p2f, placements, vtxsum, vtxocc, v2f)
