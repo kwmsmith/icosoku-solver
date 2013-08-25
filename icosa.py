@@ -85,15 +85,16 @@ def icosa_faces(vtx_graph):
 
     return ifaces
 
+def _gen_additive_partitions(p, n, npart, chunk, partitions):
+    if npart < 0:
+        return
+    if sum(p) == n:
+        partitions.append(p)
+        return
+    for i in range(p[-1] if p else chunk, 0, -1):
+        _gen_additive_partitions(p + [i], n, npart-1, chunk, partitions)
+
 def gen_additive_partitions(n, npart, chunk):
-    def _gen_additive_partitions(p, n, npart, chunk, partitions):
-        if npart < 0:
-            return
-        if sum(p) == n:
-            partitions.append(p)
-            return
-        for i in range(p[-1] if p else chunk, 0, -1):
-            _gen_additive_partitions(p + [i], n, npart-1, chunk, partitions)
     parts = []
     _gen_additive_partitions([], n, npart, chunk, parts)
     return parts
@@ -156,18 +157,23 @@ def order_pieces(pieces, p2f):
 
 def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, faces):
     for face in faces:
-        idx = face.index(vtx)
+        # if face == (6,7,8):
+            # import ipdb; ipdb.set_trace()
         try:
             cnt, pieces = faces_to_pieces[face]
         except KeyError:
             continue
+        idx = face.index(vtx)
         for piece, rots in pieces.items():
             newrots = []
             for rot in rots:
                 pval = rot_piece(piece, rot)[idx]
-                if lower_bound <= vtx - pval <= upper_bound:
+                if lower_bound <= pval <= upper_bound:
                     newrots.append(rot)
-            pieces[piece] = newrots
+            if newrots:
+                pieces[piece] = newrots
+            else:
+                del pieces[piece]
             delta = len(rots) - len(newrots)
             faces_to_pieces[face][0] -= delta
             pieces_to_face_cnt[piece] -= delta
@@ -221,13 +227,18 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
             # bound faces at each vertex.
             for vtx in bestface:
                 upper_bound = min(vtx - vtxsum[vtx], 3)
-                lower_bound = float(vtx - vtxsum[vtx]) / (5 - vtxocc[vtx])
+                lower_bound = 0
+                if (5-vtxocc[vtx]) and (vtx - vtxsum[vtx]) > 3 * (5 - vtxocc[vtx]):
+                    cutoff = float(vtx-vtxsum[vtx]) / (5-vtxocc[vtx])
+                    assert cutoff >= 3
+                    lower_bound = cutoff if cutoff >= 3 else 0
                 if upper_bound < 0 or lower_bound > 3:
                     break
                 if lower_bound > upper_bound:
                     break
                 set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, vtx2faces[vtx])
             else:
+                # import ipdb; ipdb.set_trace()
                 placements[bestface] = rpiece
                 if search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
                     return True
@@ -252,5 +263,5 @@ if __name__ == '__main__':
     placements = {}
     vtxsum = {v:0 for v in vertices}
     vtxocc = vtxsum.copy()
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
     success = search(f2p, p2f, placements, vtxsum, vtxocc, v2f)
