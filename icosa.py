@@ -5,25 +5,31 @@ from copy import deepcopy
 Piece = namedtuple('Piece', 'id value')
 
 pieces = tuple([Piece(i, x) for i, x in 
-        enumerate(sorted([
-            (0, 3, 3), (0, 0, 2), (2, 2, 2), (1, 2, 3), (0, 1, 2), (0, 1, 1), (1, 2, 3), 
-            (0, 2, 1), (1, 3, 2), (0, 2, 1), (0, 0, 1), (0, 2, 2), (3, 3, 3), (0, 0, 0), 
-            (1, 3, 2), (0, 2, 1), (0, 1, 2), (1, 1, 1), (0, 0, 3), (0, 1, 2), 
-            ]))
-        ])
+    enumerate(sorted([
+        (0, 3, 3), (0, 0, 2), (2, 2, 2), (1, 2, 3), (0, 1, 2), (0, 1, 1), (1, 2, 3), 
+        (0, 2, 1), (1, 3, 2), (0, 2, 1), (0, 0, 1), (0, 2, 2), (3, 3, 3), (0, 0, 0), 
+        (1, 3, 2), (0, 2, 1), (0, 1, 2), (1, 1, 1), (0, 0, 3), (0, 1, 2), 
+        ]))
+    ])
 
-# Vertices are specifed as follows:
-#   * The vertex labeled '1' is always first.
-#   * The next 5 vertices are attached to '1', listed in CCW order, starting
-#   with the least ('2' in this case).
-#   * The next 5 vertices are "below" the previous layer, starting with the
-#   vertex below and to the left of the first vertex listed in the previous
-#   level ('2' in this case).  They are listed in CCW order.
-#   * The vertex opposite '1' is listed last.
-# For instance:
-# vertices = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
 
 def verify_vertices(vtxs):
+    '''
+    Check that the ordered vertex list `vtxs` is valid. Returns True / False
+    accordingly.
+
+    Vertices are specifed as follows:
+      * The vertex labeled '1' is always first.
+      * The next 5 vertices are attached to '1', listed in CCW order, starting
+      with the least ('2' in this case).
+      * The next 5 vertices are "below" the previous layer, starting with the
+      vertex below and to the left of the first vertex listed in the previous
+      level ('2' in this case).  They are listed in CCW order.
+      * The vertex opposite '1' is listed last.
+    For instance:
+    vertices = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
+
+    '''
     if vtxs[0] != 1:
         return False
     if min(vtxs[1:6]) != vtxs[1]:
@@ -122,16 +128,30 @@ def get_bestface(f2p):
     return min(f2p.items(), key=keyfunc)[0]
 
 def order_pieces(face, pieces, p2f):
-    return sorted((p2f[piece], piece, rots) for piece, rots in pieces.items())
+    opieces = [(p2f[piece], piece, rot) for piece, rots in pieces.items() for rot in rots]
+    opieces.sort()
+    return opieces
+
+def order_pieces_min_vertex(face, pieces, p2f):
+
+    opieces = []
+    for piece, rots in pieces.items():
+        for rot in rots:
+            rpiece = rot_piece(piece, rot)
+            score = sum(f-p for f,p in zip(face, rpiece))
+            assert score >= 0
+            opieces.append((score, piece, rot))
+    opieces.sort()
+    return opieces
 
 def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, faces):
 
     for face in faces:
-        
-        try:
-            cnt, pieces = faces_to_pieces[face]
-        except KeyError:
-            continue
+        cnt, pieces = faces_to_pieces.get(face, (0, {}))
+        # try:
+            # cnt, pieces = faces_to_pieces[face]
+        # except KeyError:
+            # continue
 
         idx = face.index(vtx)
         for piece, rots in pieces.items():
@@ -168,53 +188,57 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
         assert vtxocc[vtx] <= 5
 
     # order bestface's pieces by total number of placements overall, including rotations.
+    # ordered_pieces = order_pieces_min_vertex(bestface, pieces, pieces_to_face_cnt)
     ordered_pieces = order_pieces(bestface, pieces, pieces_to_face_cnt)
 
     faces_to_pieces_orig = faces_to_pieces
-    pieces_to_face_cnt_orig = pieces_to_face_cnt
+
+    seen = set()
 
     # try placing each piece in ordered_pieces, checking vertex sums, etc.
-    for idx, (rank, piece, rots) in enumerate(ordered_pieces):
+    for rank, piece, rot in ordered_pieces:
 
-        # Detect duplicates
-        if idx and piece.value == ordered_pieces[idx-1][1].value:
+        if (piece.value, rot) in seen:
             continue
 
+        seen.add((piece.value, rot))
+
         faces_to_pieces = deepcopy(faces_to_pieces_orig)
-        pieces_to_face_cnt = pieces_to_face_cnt_orig.copy()
 
         # take piece off the market for other faces...
-        pieces_to_face_cnt.pop(piece)
+        p2fc = pieces_to_face_cnt.pop(piece)
         for face, (pcnt, pieces) in faces_to_pieces.items():
             if piece in pieces:
                 faces_to_pieces[face][0] -= len(pieces.pop(piece))
 
-        for rot in rots:
-            rpiece = rot_piece(piece, rot)
-            # update the vertex sums...
-            for vtx, points in zip(bestface, rpiece):
-                vtxsum[vtx] += points
-            # bound faces at each vertex.
-            for vtx in bestface:
-                upper_bound = min(vtx - vtxsum[vtx], 3)
-                lower_bound = 0
-                if (5-vtxocc[vtx]) and (vtx - vtxsum[vtx]) > 3 * (5 - vtxocc[vtx]):
-                    lower_bound = float(vtx-vtxsum[vtx]) / (5-vtxocc[vtx])
-                    assert lower_bound >= 3
-                if upper_bound < 0 or lower_bound > 3:
-                    break
-                if lower_bound > upper_bound:
-                    break
-                set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, vtx2faces[vtx])
-            else:
-                placements[bestface] = (rpiece, piece, rot)
-                if search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
-                    return True
-                # reset placements
-                del placements[bestface]
-            # reset vertex sums.
-            for vtx, points in zip(bestface, rpiece):
-                vtxsum[vtx] -= points
+        # for rot in rots:
+        rpiece = rot_piece(piece, rot)
+        # update the vertex sums...
+        for vtx, points in zip(bestface, rpiece):
+            vtxsum[vtx] += points
+        # bound faces at each vertex.
+        for vtx in bestface:
+            upper_bound = min(vtx - vtxsum[vtx], 3)
+            lower_bound = 0
+            if (5-vtxocc[vtx]) and (vtx - vtxsum[vtx]) > 3 * (5 - vtxocc[vtx]):
+                lower_bound = float(vtx-vtxsum[vtx]) / (5-vtxocc[vtx])
+                assert lower_bound >= 3
+            if upper_bound < 0 or lower_bound > 3:
+                break
+            if lower_bound > upper_bound:
+                break
+            set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, vtx2faces[vtx])
+        else:
+            placements[bestface] = (rpiece, piece, rot)
+            if search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
+                return True
+            # reset placements
+            del placements[bestface]
+        # reset vertex sums.
+        for vtx, points in zip(bestface, rpiece):
+            vtxsum[vtx] -= points
+
+        pieces_to_face_cnt[piece] = p2fc
 
     # reset vertex occupancy
     for vtx in bestface:
@@ -254,11 +278,12 @@ def main(pieces, vertices):
         assert res
     return {f:rp for f, (rp, p, r) in placements.items()}
 
-
 if __name__ == '__main__':
     vertices1 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
     placements = main(pieces, vertices1)
     vertices2 = range(1, 13)
     placements2 = main(pieces, vertices2)
+
+    # This case is really hard for the current algorithm...
     # vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
     # placements3 = main(pieces, vertices3)
