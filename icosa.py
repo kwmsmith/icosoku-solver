@@ -279,9 +279,9 @@ def main(pieces, vertices):
     return {f:rp for f, (rp, p, r) in placements.items()}
 
 if __name__ == '__main__':
-    vertices1 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
-    placements = main(pieces, vertices1)
-    vertices2 = range(1, 13)
+    vertices1 = range(1, 13)
+    placements1 = main(pieces, vertices1)
+    vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
     placements2 = main(pieces, vertices2)
 
     # This case is really hard for the current algorithm...
