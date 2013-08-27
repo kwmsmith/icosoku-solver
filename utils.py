@@ -9,14 +9,14 @@ def _gen_additive_partitions(p, n, npart, chunk, partitions):
     for i in range(p[-1] if p else chunk, 0, -1):
         _gen_additive_partitions(p + [i], n, npart-1, chunk, partitions)
 
-def gen_additive_partitions(n, npart, chunk):
+def gen_additive_partitions(n, npart, chunk=3):
     parts = []
     _gen_additive_partitions([], n, npart, chunk, parts)
-    for part in parts:
-        part.extend([0] * (npart-len(part)))
+    # Add zeros to each partition to fill out to npart elements.
+    parts = [(p+([0] * (npart-len(p)))) for p in parts]
     return parts
 
-def count_additive_partitions(n, npart, chunk):
+def count_additive_partitions(n, npart, chunk=3):
     assert n >= 0
     if not n:
         return 1
