@@ -127,15 +127,15 @@ def get_bestface(f2p):
         return item[1][0]
     return min(f2p.items(), key=keyfunc)[0]
 
-def order_pieces(face, pieces, p2f):
-    opieces = [(p2f[piece], piece, rot) for piece, rots in pieces.items() for rot in rots]
+def order_pieces(face, f2p, p2f):
+    opieces = [(p2f[piece], piece, rot) for piece, rots in f2p[face][1].items() for rot in rots]
     opieces.sort()
     return opieces
 
-def order_pieces_min_vertex(face, pieces, p2f):
+def order_pieces_min_vertex(face, f2p, p2f):
 
     opieces = []
-    for piece, rots in pieces.items():
+    for piece, rots in f2p[face][1].items():
         for rot in rots:
             rpiece = rot_piece(piece, rot)
             score = sum(f-p for f,p in zip(face, rpiece))
@@ -144,15 +144,24 @@ def order_pieces_min_vertex(face, pieces, p2f):
     opieces.sort()
     return opieces
 
+def order_pieces_prob(face, pieces, vtxsum, vtxocc):
+    from utils import hist
+    mul = operator.mul
+    hists = {v:hist(v-vtxsum[v], 5-vtxocc[v]) for v in face}
+    opieces = []
+    for piece, rots in pieces.items():
+        for rot in rots:
+            rpiece = rot_piece(piece, rot)
+            score = reduce(mul, (hists[v][p] for v,p in zip(face, rpiece)), 1.0)
+            assert 0 <= score <= 1.0
+            opieces.append((score, piece, rot))
+    opieces.sort(reverse=True)
+    return opieces
+
 def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, faces):
 
     for face in faces:
         cnt, pieces = faces_to_pieces.get(face, (0, {}))
-        # try:
-            # cnt, pieces = faces_to_pieces[face]
-        # except KeyError:
-            # continue
-
         idx = face.index(vtx)
         for piece, rots in pieces.items():
             newrots = []
@@ -180,16 +189,18 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
     # bestface = (face with fewest piece options)
     bestface = get_bestface(faces_to_pieces)
 
+
     cnt, pieces = faces_to_pieces.pop(bestface)
+
+    # order bestface's pieces by total number of placements overall, including rotations.
+    # ordered_pieces = order_pieces(bestface, faces_to_pieces, pieces_to_face_cnt)
+    # ordered_pieces = order_pieces_min_vertex(bestface, faces_to_pieces, pieces_to_face_cnt)
+    ordered_pieces = order_pieces_prob(bestface, pieces, vtxsum, vtxocc)
 
     # bump the vertex occupancy
     for vtx in bestface:
         vtxocc[vtx] += 1
         assert vtxocc[vtx] <= 5
-
-    # order bestface's pieces by total number of placements overall, including rotations.
-    # ordered_pieces = order_pieces_min_vertex(bestface, pieces, pieces_to_face_cnt)
-    ordered_pieces = order_pieces(bestface, pieces, pieces_to_face_cnt)
 
     faces_to_pieces_orig = faces_to_pieces
 
@@ -273,17 +284,27 @@ def main(pieces, vertices):
     vtxsum = {v:0 for v in vertices}
     vtxocc = vtxsum.copy()
     success = search(f2p, p2f, placements, vtxsum, vtxocc, v2f)
-    if success:
-        res, msg = verify_solution(pieces, make_faces(vertices), placements)
-        assert res
+    assert success
+    res, msg = verify_solution(pieces, make_faces(vertices), placements)
+    assert res
     return {f:rp for f, (rp, p, r) in placements.items()}
 
-if __name__ == '__main__':
-    vertices1 = range(1, 13)
-    placements1 = main(pieces, vertices1)
-    vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
-    placements2 = main(pieces, vertices2)
+def run(configfname):
+    from numpy import load
+    configs = load(configfname)
+    for idx, config in enumerate(configs[-1:]):
+        print idx, config
+        placement = main(pieces, list(config))
+        print placement
 
+if __name__ == '__main__':
+
+    run('configs.npy')
+
+    # vertices1 = range(1, 13)
+    # placements1 = main(pieces, vertices1)
+    # vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
+    # placements2 = main(pieces, vertices2)
     # This case is really hard for the current algorithm...
     # vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
     # placements3 = main(pieces, vertices3)
