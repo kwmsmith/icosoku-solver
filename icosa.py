@@ -163,7 +163,7 @@ def order_pieces_prob(face, pieces, vtxsum, vtxocc):
             rpiece = rot_piece(piece, rot)
             score = reduce(mul, (hists[v][p] for v,p in zip(face, rpiece)), 1.0)
             assert 0 <= score <= 1.0
-            opieces.append((score, piece, rot))
+            opieces.append((score, piece, rpiece))
     opieces.sort(reverse=True)
     return opieces
 
@@ -205,9 +205,8 @@ def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
     seen = set()
 
     # try placing each piece in ordered_pieces, checking vertex sums, etc.
-    for rank, piece, rot in ordered_pieces:
+    for rank, piece, rpiece in ordered_pieces:
 
-        rpiece = rot_piece(piece, rot)
         if rpiece in seen:
             continue
         seen.add(rpiece)
@@ -234,7 +233,7 @@ def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
                 break
             set_bounds(faces_to_pieces, upper_bound, lower_bound, vtx, vtx2faces[vtx])
         else:
-            placements[bestface] = (rpiece, piece, rot)
+            placements[bestface] = (rpiece, piece)
             if search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
                 return True
             # reset placements
@@ -259,7 +258,7 @@ def verify_solution(pieces, faces, placements):
         return False, "Not all faces are included in placements."
 
     # make sure we used all pieces in all slots.
-    if set(pieces) != {p for rp, p, r in placements.values()}:
+    if set(pieces) != {p for rp, p in placements.values()}:
         return False, "placed pieces not identical to original pieces."
 
     # Check all vertex sums.
@@ -280,7 +279,7 @@ def main(pieces, vertices):
     assert success
     res, msg = verify_solution(pieces, make_faces(vertices), placements)
     assert res
-    return {f:rp for f, (rp, p, r) in placements.items()}
+    return {f:rp for f, (rp, p) in placements.items()}
 
 def run(configs):
     for idx, config in enumerate(configs[-1:]):
@@ -318,8 +317,8 @@ def test():
     return placements1, placements2, placements3
 
 if __name__ == '__main__':
-    from numpy import load
-    configs = load('configs.npy')
-    run_rand(configs, 'timings.txt')
+    # from numpy import load
+    # configs = load('configs.npy')
+    # run_rand(configs, 'timings.txt')
     # run(configs)
-    # p1, p2, p3 = test()
+    p1, p2, p3 = test()
