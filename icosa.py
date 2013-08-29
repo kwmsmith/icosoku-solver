@@ -279,6 +279,7 @@ def verify_solution(pieces, faces, placements):
     return True, "All checks out!"
 
 def main(pieces, vertices):
+    vertices = list(vertices)
     f2p, p2f, v2f = setup_state(pieces, vertices)
     placements = {}
     vtxsum = {v:0 for v in vertices}
@@ -289,22 +290,43 @@ def main(pieces, vertices):
     assert res
     return {f:rp for f, (rp, p, r) in placements.items()}
 
-def run(configfname):
-    from numpy import load
-    configs = load(configfname)
+def run(configs):
     for idx, config in enumerate(configs[-1:]):
         print idx, config
         placement = main(pieces, list(config))
         print placement
 
-if __name__ == '__main__':
+def run_rand(configs, outfname):
+    from random import randrange
+    from time import clock
+    from cPickle import dump
+    seen = set()
+    nn = len(configs)
+    with open(outfname, 'w') as fh:
+        while len(seen) < nn:
+            idx = randrange(nn)
+            while idx in seen:
+                idx = randrange(nn)
+            seen.add(idx)
+            config = configs[idx]
+            t0 = clock()
+            placements = main(pieces, config)
+            t1 = clock()
+            msg = (idx, t1-t0, list(config), placements)
+            dump(msg, fh)
+            print '{}:{:.2f}:{}:{}'.format(*msg)
 
-    run('configs.npy')
+if __name__ == '__main__':
+    from numpy import load
+    configs = load('configs.npy')
+    run_rand(configs, 'timings.txt')
+
+    # run(configs)
 
     # vertices1 = range(1, 13)
     # placements1 = main(pieces, vertices1)
     # vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
     # placements2 = main(pieces, vertices2)
-    # This case is really hard for the current algorithm...
+    # # This case is really hard for the current algorithm...
     # vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
     # placements3 = main(pieces, vertices3)
