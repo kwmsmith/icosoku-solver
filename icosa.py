@@ -115,12 +115,7 @@ def setup_state(pieces, vertices):
                 faces_to_pieces[face][1][piece] = rots
                 faces_to_pieces[face][0] += len(rots)
 
-    pieces_to_face_cnt = {p:0 for p in pieces}
-    for face, (cnt, pcs) in faces_to_pieces.items():
-        for piece, rots in pcs.items():
-            pieces_to_face_cnt[piece] += len(rots)
-
-    return faces_to_pieces, pieces_to_face_cnt, vertex_to_faces(faces)
+    return faces_to_pieces, vertex_to_faces(faces)
 
 def get_bestface(f2p):
     def keyfunc(item):
@@ -158,7 +153,7 @@ def order_pieces_prob(face, pieces, vtxsum, vtxocc):
     opieces.sort(reverse=True)
     return opieces
 
-def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, faces):
+def set_bounds(faces_to_pieces, upper_bound, lower_bound, vtx, faces):
 
     for face in faces:
         cnt, pieces = faces_to_pieces.get(face, (0, {}))
@@ -175,12 +170,10 @@ def set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vt
                 del pieces[piece]
             delta = len(rots) - len(newrots)
             faces_to_pieces[face][0] -= delta
-            pieces_to_face_cnt[piece] -= delta
 
 
-def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
+def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
     assert len(faces_to_pieces) + len(placements) == 20
-    assert len(faces_to_pieces) == len(pieces_to_face_cnt)
 
     # check goal, if found, return goal
     if not faces_to_pieces:
@@ -193,8 +186,8 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
     cnt, pieces = faces_to_pieces.pop(bestface)
 
     # order bestface's pieces by total number of placements overall, including rotations.
-    # ordered_pieces = order_pieces(bestface, faces_to_pieces, pieces_to_face_cnt)
-    # ordered_pieces = order_pieces_min_vertex(bestface, faces_to_pieces, pieces_to_face_cnt)
+    # ordered_pieces = order_pieces(bestface, faces_to_pieces) 
+    # ordered_pieces = order_pieces_min_vertex(bestface, faces_to_pieces)
     ordered_pieces = order_pieces_prob(bestface, pieces, vtxsum, vtxocc)
 
     # bump the vertex occupancy
@@ -217,7 +210,6 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
         faces_to_pieces = deepcopy(faces_to_pieces_orig)
 
         # take piece off the market for other faces...
-        p2fc = pieces_to_face_cnt.pop(piece)
         for face, (pcnt, pieces) in faces_to_pieces.items():
             if piece in pieces:
                 faces_to_pieces[face][0] -= len(pieces.pop(piece))
@@ -238,18 +230,16 @@ def search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2
                 break
             if lower_bound > upper_bound:
                 break
-            set_bounds(faces_to_pieces, pieces_to_face_cnt, upper_bound, lower_bound, vtx, vtx2faces[vtx])
+            set_bounds(faces_to_pieces, upper_bound, lower_bound, vtx, vtx2faces[vtx])
         else:
             placements[bestface] = (rpiece, piece, rot)
-            if search(faces_to_pieces, pieces_to_face_cnt, placements, vtxsum, vtxocc, vtx2faces):
+            if search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
                 return True
             # reset placements
             del placements[bestface]
         # reset vertex sums.
         for vtx, points in zip(bestface, rpiece):
             vtxsum[vtx] -= points
-
-        pieces_to_face_cnt[piece] = p2fc
 
     # reset vertex occupancy
     for vtx in bestface:
@@ -280,11 +270,11 @@ def verify_solution(pieces, faces, placements):
 
 def main(pieces, vertices):
     vertices = list(vertices)
-    f2p, p2f, v2f = setup_state(pieces, vertices)
+    f2p, v2f = setup_state(pieces, vertices)
     placements = {}
     vtxsum = {v:0 for v in vertices}
     vtxocc = vtxsum.copy()
-    success = search(f2p, p2f, placements, vtxsum, vtxocc, v2f)
+    success = search(f2p, placements, vtxsum, vtxocc, v2f)
     assert success
     res, msg = verify_solution(pieces, make_faces(vertices), placements)
     assert res
@@ -317,16 +307,16 @@ def run_rand(configs, outfname):
             print '{}:{:.2f}:{}:{}'.format(*msg)
 
 if __name__ == '__main__':
-    from numpy import load
-    configs = load('configs.npy')
-    run_rand(configs, 'timings.txt')
+    # from numpy import load
+    # configs = load('configs.npy')
+    # run_rand(configs, 'timings.txt')
 
     # run(configs)
 
-    # vertices1 = range(1, 13)
-    # placements1 = main(pieces, vertices1)
-    # vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
-    # placements2 = main(pieces, vertices2)
-    # # This case is really hard for the current algorithm...
-    # vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
-    # placements3 = main(pieces, vertices3)
+    vertices1 = range(1, 13)
+    placements1 = main(pieces, vertices1)
+    vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
+    placements2 = main(pieces, vertices2)
+    # This case is really hard for the current algorithm...
+    vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
+    placements3 = main(pieces, vertices3)
