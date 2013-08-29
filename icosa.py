@@ -1,17 +1,30 @@
 import operator
-from collections import Counter, namedtuple
-from copy import deepcopy
+from collections import Counter
 
-Piece = namedtuple('Piece', 'id value')
-
-pieces = tuple([Piece(i, x) for i, x in 
-    enumerate(sorted([
-        (0, 3, 3), (0, 0, 2), (2, 2, 2), (1, 2, 3), (0, 1, 2), (0, 1, 1), (1, 2, 3), 
-        (0, 2, 1), (1, 3, 2), (0, 2, 1), (0, 0, 1), (0, 2, 2), (3, 3, 3), (0, 0, 0), 
-        (1, 3, 2), (0, 2, 1), (0, 1, 2), (1, 1, 1), (0, 0, 3), (0, 1, 2), 
-        ]))
-    ])
-
+pieces = tuple(x + (i,) for i, x in 
+        enumerate((
+            (0, 0, 0),
+            (0, 0, 1),
+            (0, 0, 2),
+            (0, 0, 3),
+            (0, 1, 1),
+            (0, 1, 2),
+            (0, 1, 2),
+            (0, 1, 2),
+            (0, 2, 1),
+            (0, 2, 1),
+            (0, 2, 1),
+            (0, 2, 2),
+            (0, 3, 3),
+            (1, 1, 1),
+            (1, 2, 3),
+            (1, 2, 3),
+            (1, 3, 2),
+            (1, 3, 2),
+            (2, 2, 2),
+            (3, 3, 3),
+            ))
+        )
 
 def verify_vertices(vtxs):
     '''
@@ -80,13 +93,12 @@ def make_faces(vertices):
     return faces
 
 def rot_piece(piece, r):
-    id, val = piece.id, piece.value
     if r == 0:
-        return val
+        return (piece[0], piece[1], piece[2])
     if r == 1:
-        return (val[1], val[2], val[0])
+        return (piece[1], piece[2], piece[0])
     if r == 2:
-        return (val[2], val[0], val[1])
+        return (piece[2], piece[0], piece[1])
 
 def vertex_to_faces(faces):
     v2f = {i:[] for i in range(1, 13)}
@@ -99,9 +111,9 @@ def setup_state(pieces, vertices):
 
     faces = make_faces(vertices)
 
-    faces_to_pieces = {f:[0,{}] for f in faces}
+    faces_to_pieces = {f:{} for f in faces}
     for piece in pieces:
-        if piece.value[0] == piece.value[1] == piece.value[2]:
+        if piece[0] == piece[1] == piece[2]:
             poss_rots = [0]
         else:
             poss_rots = range(3)
@@ -112,14 +124,16 @@ def setup_state(pieces, vertices):
                 if min(f - p for p, f in zip(rpiece, face)) >= 0:
                     rots.append(rot)
             if rots:
-                faces_to_pieces[face][1][piece] = rots
-                faces_to_pieces[face][0] += len(rots)
+                faces_to_pieces[face][piece] = rots
 
     return faces_to_pieces, vertex_to_faces(faces)
 
 def get_bestface(f2p):
     def keyfunc(item):
-        return item[1][0]
+        nrots = 0
+        for rots in item[1].values():
+            nrots += len(rots)
+        return nrots
     return min(f2p.items(), key=keyfunc)[0]
 
 def order_pieces(face, f2p, p2f):
@@ -154,23 +168,18 @@ def order_pieces_prob(face, pieces, vtxsum, vtxocc):
     return opieces
 
 def set_bounds(faces_to_pieces, upper_bound, lower_bound, vtx, faces):
-
     for face in faces:
-        cnt, pieces = faces_to_pieces.get(face, (0, {}))
+        pieces = faces_to_pieces.get(face, {})
         idx = face.index(vtx)
         for piece, rots in pieces.items():
-            newrots = []
-            for rot in rots:
-                pval = rot_piece(piece, rot)[idx]
-                if lower_bound <= pval <= upper_bound:
-                    newrots.append(rot)
+            newrots = [rot for rot in rots if lower_bound <= piece[(idx+rot)%3] <= upper_bound]
             if newrots:
                 pieces[piece] = newrots
             else:
                 del pieces[piece]
-            delta = len(rots) - len(newrots)
-            faces_to_pieces[face][0] -= delta
 
+def copyf2p(f2p):
+    return {f:p.copy() for f,p in f2p.items()}
 
 def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
     assert len(faces_to_pieces) + len(placements) == 20
@@ -182,13 +191,9 @@ def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
     # bestface = (face with fewest piece options)
     bestface = get_bestface(faces_to_pieces)
 
+    pieces_orig = faces_to_pieces.pop(bestface)
 
-    cnt, pieces = faces_to_pieces.pop(bestface)
-
-    # order bestface's pieces by total number of placements overall, including rotations.
-    # ordered_pieces = order_pieces(bestface, faces_to_pieces) 
-    # ordered_pieces = order_pieces_min_vertex(bestface, faces_to_pieces)
-    ordered_pieces = order_pieces_prob(bestface, pieces, vtxsum, vtxocc)
+    ordered_pieces = order_pieces_prob(bestface, pieces_orig, vtxsum, vtxocc)
 
     # bump the vertex occupancy
     for vtx in bestface:
@@ -202,20 +207,17 @@ def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
     # try placing each piece in ordered_pieces, checking vertex sums, etc.
     for rank, piece, rot in ordered_pieces:
 
-        if (piece.value, rot) in seen:
+        rpiece = rot_piece(piece, rot)
+        if rpiece in seen:
             continue
+        seen.add(rpiece)
 
-        seen.add((piece.value, rot))
-
-        faces_to_pieces = deepcopy(faces_to_pieces_orig)
+        faces_to_pieces = copyf2p(faces_to_pieces_orig)
 
         # take piece off the market for other faces...
-        for face, (pcnt, pieces) in faces_to_pieces.items():
-            if piece in pieces:
-                faces_to_pieces[face][0] -= len(pieces.pop(piece))
+        for pieces in faces_to_pieces.values():
+            pieces.pop(piece, None)
 
-        # for rot in rots:
-        rpiece = rot_piece(piece, rot)
         # update the vertex sums...
         for vtx, points in zip(bestface, rpiece):
             vtxsum[vtx] += points
@@ -246,7 +248,7 @@ def search(faces_to_pieces, placements, vtxsum, vtxocc, vtx2faces):
         vtxocc[vtx] -= 1
 
     # reset faces_to_pieces
-    faces_to_pieces_orig[bestface] = [cnt, pieces]
+    faces_to_pieces_orig[bestface] = pieces_orig
 
     return False
 
@@ -306,17 +308,18 @@ def run_rand(configs, outfname):
             dump(msg, fh)
             print '{}:{:.2f}:{}:{}'.format(*msg)
 
-if __name__ == '__main__':
-    # from numpy import load
-    # configs = load('configs.npy')
-    # run_rand(configs, 'timings.txt')
-
-    # run(configs)
-
+def test():
     vertices1 = range(1, 13)
     placements1 = main(pieces, vertices1)
     vertices2 = [1, 2, 5, 10, 8, 6, 11, 12, 4, 3, 7, 9]
     placements2 = main(pieces, vertices2)
-    # This case is really hard for the current algorithm...
     vertices3 = [ 1,  8, 12, 11, 10,  9,  7,  6,  5,  4,  3,  2]
     placements3 = main(pieces, vertices3)
+    return placements1, placements2, placements3
+
+if __name__ == '__main__':
+    from numpy import load
+    configs = load('configs.npy')
+    run_rand(configs, 'timings.txt')
+    # run(configs)
+    # p1, p2, p3 = test()
